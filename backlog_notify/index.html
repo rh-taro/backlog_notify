@@ -1,0 +1,213 @@
+<!DOCTYPE html>
+<html>
+    <head>
+        <!-- <script src="http://code.jquery.com/jquery-3.2.1.min.js"></script> -->
+        <link rel="stylesheet" href="https://maxcdn.bootstrapcdn.com/bootstrap/3.3.6/css/bootstrap.min.css">
+        <script src="https://maxcdn.bootstrapcdn.com/bootstrap/3.3.6/js/bootstrap.min.js"></script>
+        <meta charset="UTF-8">
+        <title>Desktop Notification</title>
+    </head>
+    <body>
+        <div class="container">
+        <form id="api_form"> 
+            <label><h4>backlogドメイン</h4></label>
+            <div class="row">
+                <div class="col-xs-10">
+                    <input type="text" class="form-control" width="80%" id="backlogDomain" placeholder="xxx.backlog.jp">
+                </div>
+            </div>
+
+            <label><h4>APIキー</h4></label>
+            <div class="row">
+                <div class="col-xs-10">
+                    <input type="text" class="form-control" width="80%" id="apikey">
+                </div>
+            </div>
+
+            <label><h4>確認周期(分)</h4></label>
+            <div class="row">
+                <div class="col-xs-4">
+                    <input type="number" class="form-control" width="20%" id="cycle">
+                </div>
+            </div>
+        
+            <label><h4>チェックするお知らせ数(1~100個)</h4></label>
+            <div class="row">
+                <div class="col-xs-4">
+                    <input type="number" class="form-control" width="20%" id="count">
+                </div>
+            </div>
+
+            <input type="submit" style="display:none;">
+            <!-- エンター用submitボタン
+                startとstopを共通化するのが一番か -->
+        </form>
+        
+        <hr>
+        
+        <button type="button" class="btn btn-primary btn-lg" id="start" onclick="start_check_api()">実行</button>
+        <button type="button" class="btn btn-primary btn-lg" id="stop" onclick="stop_check_api()">終了</button>
+        
+        <hr>
+        
+        <h4><div id="msg"></div></h4>
+        <h4><div id="msg2"></div></h4>
+    </div>
+
+    <script type="text/javascript">
+        // http://qiita.com/Chayata/items/be0f7f8d371039ab9fdd
+        // http://qiita.com/indometacin/items/0a436338165dc8b76ec4
+        // 上の読み込みはあってもなくてもかわんないっぽい？一応コメントで
+        // electronではnpmでjqueryインストールしてこうやってjqueryを使うらしい
+        const $ = require('jquery');
+        const {ipcRenderer} = require('electron')
+
+        $(function(){
+            var conf = ipcRenderer.sendSync('load_conf');
+            $('#apikey').val(conf["apikey"]);
+            $('#backlogDomain').val(conf["backlogDomain"]);
+            $('#cycle').val(conf["cycle"]);
+            $('#count').val(conf["count"]);
+            checking_flg = false;
+            min_timestamp = 1000 * 60; //msec
+            $('#stop').attr('disabled', true);
+        });
+
+        $('#api_form').submit(function(){
+            if (checking_flg) {
+                stop_check_api();
+            } else {
+                start_check_api();
+            }
+            return false;
+        })
+
+        function get_api(){
+            var cycle = $('#cycle').val();
+
+            DD = new Date();
+            DD.setMilliseconds(min_timestamp * cycle);
+            disp_hour = DD.getHours();
+            disp_min = DD.getMinutes();
+            disp_sec = DD.getSeconds();
+            $('#msg2').text("次回は" + disp_hour + "時" + disp_min + "分" + disp_sec + "秒に確認します");
+
+            var apikey = $('#apikey').val();
+            var backlogDomain = $('#backlogDomain').val();
+            var check_max = $('#count').val();
+
+            if (apikey != "") {
+                do_ajax("https://" + backlogDomain, apikey, check_max)
+            }
+        }
+
+        function do_ajax(api_url, api_key, max_num) {
+            var end_point = api_url + '/api/v2/notifications?apiKey=' + api_key + '&count=' + max_num;
+
+            $.ajax({
+                type: 'GET',
+                url: end_point,
+            }).done(function (response) {
+                response.forEach(function(value) {
+                    if (!(value["resourceAlreadyRead"] && value["alreadyRead"])) {
+                        // 個別にリンクつきでアラート
+                        var title = (value["issue"] != null ? value["issue"]["summary"] : value["project"]["name"]);
+                        var body = value["sender"]["name"] + "さんからのお知らせがあります";
+                        desktop_alert(
+                            api_url,
+                            title,
+                            body,  
+                            value["id"]
+                        );
+                    }
+                });
+            }).fail(function(response) {
+        
+            desktop_alert("backlog", "データ取得エラー", "");
+        })
+    }
+
+    function desktop_alert(url, title, body, id) {
+        var notice_instance = new Notification(title,{body: body});
+      
+        // 次の通知と同時に消す
+        // setTimeout(function(){
+        //   notice_instance.close();
+        // }, min_timestamp * cycle);
+
+        // クリックまたは表示でリンク開いて通知消す
+        notice_instance.onclick = function () {
+            if (id !== "") {
+                window.open(url + "/globalbar/notifications/redirect/" + id, '_blank');
+            }
+            // notice_instance.close();
+        };
+    }
+
+    function start_check_api() {
+        var err_msg = validator();
+        if (err_msg !== "") {
+            alert(err_msg);
+            return;
+        }
+
+        var cycle = $('#cycle').val();
+        checking_flg = true;
+        get_api();
+        get_api_interval = setInterval("get_api()", min_timestamp * cycle);
+
+        $('#apikey').attr('readonly', true);
+        $('#backlogDomain').attr('readonly', true);
+        $('#cycle').attr('readonly', true);
+        $('#count').attr('readonly', true);
+        $('#start').attr('disabled', true);
+        $('#stop').attr('disabled', false);
+        $('#msg').text("実行中");
+        var conf_json = JSON.stringify({
+                                    apikey: $('#apikey').val(),
+                                    backlogDomain: $('#backlogDomain').val(),
+                                    cycle: $('#cycle').val(),
+                                    count: $('#count').val()
+                                });
+        ipcRenderer.sendSync('save_conf', conf_json);
+    }
+
+    function stop_check_api() {
+        checking_flg = false;
+        $('#apikey').attr('readonly', false);
+        $('#backlogDomain').attr('readonly', false);
+        $('#cycle').attr('readonly', false);
+        $('#count').attr('readonly', false);
+        $('#start').attr('disabled', false);
+        $('#stop').attr('disabled', true);
+        $('#msg').text("ストップ");
+        $('#msg2').text("");
+        clearInterval(get_api_interval);
+    }
+
+    function validator() {
+        var err_msg = "";
+        var apikey = $('#apikey').val();
+        var backlogDomain = $('#backlogDomain').val();
+        var cycle = parseInt($('#cycle').val());
+        var count = parseInt($('#count').val());
+        cycle = (isNaN(cycle) ? 0 : cycle);
+        count = (isNaN(count) ? 0 : count);
+      
+        // if (!(/^([0-9a-zA-Z])+$/.test(apikey)))) {
+        //   err_msg += "APIキーのフォーマットが正しくありません\n";
+        // }
+        if (!(/^[0-9a-zA-Z\-]+\.backlog\.jp$/.test(backlogDomain))) {
+            err_msg += "backlogのドメインのフォーマットが正しくありません\n";
+        }
+        if (cycle <= 0) {
+            err_msg += "周期が正しくありません\n";
+        }
+        if (count < 1 || count > 100) {
+            err_msg += "チェックするお知らせ数が正しくありません\n";
+        }
+        return err_msg;
+    }
+    </script>
+  </body>
+</html>
