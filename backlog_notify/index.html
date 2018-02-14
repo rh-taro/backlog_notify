@@ -129,18 +129,15 @@
 
     function desktop_alert(url, title, body, id) {
         var notice_instance = new Notification(title,{body: body});
-      
-        // 次の通知と同時に消す
-        // setTimeout(function(){
-        //   notice_instance.close();
-        // }, min_timestamp * cycle);
 
-        // クリックまたは表示でリンク開いて通知消す
+        // 5秒で消す
+        setTimeout(notice_instance.close.bind(notice_instance), 5000);
+
+        // クリックまたは表示でリンク開く
         notice_instance.onclick = function () {
             if (id !== "") {
                 window.open(url + "/globalbar/notifications/redirect/" + id, '_blank');
             }
-            // notice_instance.close();
         };
     }
 
